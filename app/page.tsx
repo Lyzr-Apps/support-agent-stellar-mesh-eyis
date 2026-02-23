@@ -1363,54 +1363,61 @@ function OrchestrationPanel({ agentType }: { agentType: 'chat' | 'triage' }) {
     return () => timers.forEach(t => clearTimeout(t))
   }, [agentType])
 
+  const activeStep = steps.find(s => s.status === 'active')
+
   return (
     <div className="flex justify-start">
       <div className="bg-secondary/80 rounded-2xl rounded-bl-md px-4 py-3 max-w-[85%] w-full">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
             <span className="text-xs font-semibold text-foreground">Agent Processing</span>
           </div>
-          <span className="text-[10px] font-mono text-muted-foreground">{elapsedTime}s</span>
-        </div>
-        <div className="space-y-1.5">
-          {steps.map((step) => (
-            <div key={step.id} className={cn(
-              'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-all duration-500',
-              step.status === 'active' ? 'bg-primary/10 border border-primary/20' :
-              step.status === 'completed' ? 'bg-green-50/80 border border-green-200/50' :
-              'opacity-50'
-            )}>
-              <div className={cn(
-                'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors',
-                step.status === 'active' ? 'bg-primary text-primary-foreground' :
-                step.status === 'completed' ? 'bg-green-600 text-white' :
-                'bg-muted text-muted-foreground'
-              )}>
-                {step.status === 'completed' ? <FiCheck className="w-3 h-3" /> :
-                 step.status === 'active' ? <div className="w-2 h-2 rounded-full bg-primary-foreground animate-ping" /> :
-                 step.icon}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={cn(
-                  'text-xs font-medium leading-tight',
-                  step.status === 'active' ? 'text-primary' :
-                  step.status === 'completed' ? 'text-green-700' :
-                  'text-muted-foreground'
-                )}>{step.label}</p>
-                {step.status === 'active' && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{step.description}</p>
+          <div className="flex items-center gap-1">
+            {steps.map((step, idx) => (
+              <div key={step.id} className="flex items-center gap-1">
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className={cn(
+                        'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-500',
+                        step.status === 'active' ? 'bg-primary text-primary-foreground ring-2 ring-primary/30 ring-offset-1' :
+                        step.status === 'completed' ? 'bg-green-600 text-white' :
+                        'bg-muted text-muted-foreground'
+                      )}>
+                        {step.status === 'completed' ? <FiCheck className="w-3 h-3" /> :
+                         step.status === 'active' ? <div className="w-2 h-2 rounded-full bg-primary-foreground animate-ping" /> :
+                         step.icon}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      <p className="font-medium">{step.label}</p>
+                      <p className="text-muted-foreground">{step.description}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                {idx < steps.length - 1 && (
+                  <div className={cn(
+                    'w-3 h-[2px] rounded-full transition-all duration-500',
+                    step.status === 'completed' ? 'bg-green-500' : 'bg-muted'
+                  )} />
                 )}
               </div>
-              {step.status === 'active' && (
-                <div className="flex gap-0.5">
-                  <div className="w-1 h-1 rounded-full bg-primary animate-bounce" />
-                  <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
+          {activeStep && (
+            <span className="text-xs text-primary font-medium truncate flex-shrink min-w-0">{activeStep.label}</span>
+          )}
+          <div className="flex items-center gap-2 ml-auto flex-shrink-0">
+            {activeStep && (
+              <div className="flex gap-0.5">
+                <div className="w-1 h-1 rounded-full bg-primary animate-bounce" />
+                <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            )}
+            <span className="text-[10px] font-mono text-muted-foreground">{elapsedTime}s</span>
+          </div>
         </div>
       </div>
     </div>
