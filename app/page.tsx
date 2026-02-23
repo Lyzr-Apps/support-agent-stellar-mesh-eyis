@@ -1724,6 +1724,7 @@ function VoiceScreen({
   const [statusMessage, setStatusMessage] = useState('')
   const [thinkingText, setThinkingText] = useState('')
   const [showTicketModal, setShowTicketModal] = useState(false)
+  const [ticketModalMessages, setTicketModalMessages] = useState<Message[]>([])
   const voiceSessionIdRef = useRef('voice_' + generateUUID().slice(0, 8))
 
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false)
@@ -2209,7 +2210,16 @@ function VoiceScreen({
               {callStatus === 'ended' && (
                 <div className="flex gap-3">
                   {transcriptEntries.length >= 2 && (
-                    <Button variant="outline" onClick={() => setShowTicketModal(true)} className="gap-2 text-primary border-primary/30 hover:bg-primary/10">
+                    <Button variant="outline" onClick={() => {
+                      const msgs: Message[] = transcriptEntries.map(entry => ({
+                        id: generateUUID(),
+                        role: entry.role,
+                        content: entry.role === 'user' ? `[Voice] ${entry.text}` : entry.text,
+                        timestamp: entry.timestamp,
+                      }))
+                      setTicketModalMessages(msgs)
+                      setShowTicketModal(true)
+                    }} className="gap-2 text-primary border-primary/30 hover:bg-primary/10">
                       <FiFileText className="w-4 h-4" />
                       Convert to Ticket
                     </Button>
@@ -2283,28 +2293,24 @@ function VoiceScreen({
         </Card>
       </div>
 
-      {transcriptEntries.length > 0 && (
-        <ConvertToTicketModal
-          open={showTicketModal}
-          onClose={() => setShowTicketModal(false)}
-          messages={transcriptEntries.map(entry => ({
-            id: generateUUID(),
-            role: entry.role,
-            content: entry.role === 'user' ? `[Voice] ${entry.text}` : entry.text,
-            timestamp: entry.timestamp,
-          }))}
-          channel="voice"
-          onTicketCreated={(ticket, conv) => {
-            setTickets(prev => [ticket, ...prev])
-            setConversations(prev => [conv, ...prev])
-            setCallStatus('idle')
-            setTranscriptEntries([])
-            setDuration(0)
-            setStatusMessage('Ticket created from voice call. View in Tickets.')
-            setThinkingText('')
-          }}
-        />
-      )}
+      <ConvertToTicketModal
+        open={showTicketModal}
+        onClose={() => {
+          setShowTicketModal(false)
+          setTicketModalMessages([])
+        }}
+        messages={ticketModalMessages}
+        channel="voice"
+        onTicketCreated={(ticket, conv) => {
+          setTickets(prev => [ticket, ...prev])
+          setConversations(prev => [conv, ...prev])
+          setCallStatus('idle')
+          setTranscriptEntries([])
+          setDuration(0)
+          setStatusMessage('Ticket created from voice call. View in Tickets.')
+          setThinkingText('')
+        }}
+      />
     </div>
   )
 }
