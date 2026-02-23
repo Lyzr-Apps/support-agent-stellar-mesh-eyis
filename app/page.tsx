@@ -108,6 +108,20 @@ interface TicketProperties {
 }
 
 // ============================================================
+// PERSISTENT USER ID (for agent memory)
+// ============================================================
+function getOrCreateUserId(): string {
+  if (typeof window === 'undefined') return 'user_' + Math.random().toString(36).slice(2, 10)
+  const key = 'hdfc_support_user_id'
+  let userId = localStorage.getItem(key)
+  if (!userId) {
+    userId = 'user_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36)
+    localStorage.setItem(key, userId)
+  }
+  return userId
+}
+
+// ============================================================
 // HELPERS
 // ============================================================
 
@@ -1414,6 +1428,7 @@ function ChatScreen({
   onNavigate,
   activeAgentId,
   setActiveAgentId,
+  userId,
 }: {
   conversations: Conversation[]
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>
@@ -1422,6 +1437,7 @@ function ChatScreen({
   onNavigate: (screen: NavScreen) => void
   activeAgentId: string | null
   setActiveAgentId: (id: string | null) => void
+  userId: string
 }) {
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
   const [inputValue, setInputValue] = useState('')
@@ -1472,7 +1488,7 @@ function ChatScreen({
     setStatusMessage('')
 
     try {
-      const result = await callAIAgent(inputValue.trim(), CHAT_AGENT_ID, { session_id: sessionId })
+      const result = await callAIAgent(inputValue.trim(), CHAT_AGENT_ID, { user_id: userId, session_id: sessionId })
 
       if (result.success) {
         const data = parseAgentResponse(result)
@@ -1691,6 +1707,7 @@ function VoiceScreen({
   setTickets,
   activeAgentId,
   setActiveAgentId,
+  userId,
 }: {
   conversations: Conversation[]
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>
@@ -1698,6 +1715,7 @@ function VoiceScreen({
   setTickets: React.Dispatch<React.SetStateAction<Ticket[]>>
   activeAgentId: string | null
   setActiveAgentId: (id: string | null) => void
+  userId: string
 }) {
   const [callStatus, setCallStatus] = useState<'idle' | 'connecting' | 'active' | 'ended'>('idle')
   const [duration, setDuration] = useState(0)
@@ -1706,6 +1724,7 @@ function VoiceScreen({
   const [statusMessage, setStatusMessage] = useState('')
   const [thinkingText, setThinkingText] = useState('')
   const [showTicketModal, setShowTicketModal] = useState(false)
+  const voiceSessionIdRef = useRef('voice_' + generateUUID().slice(0, 8))
 
   const wsRef = useRef<WebSocket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -1742,10 +1761,13 @@ function VoiceScreen({
     nextPlayTimeRef.current = 0
 
     try {
+      const currentVoiceSessionId = 'voice_' + generateUUID().slice(0, 8)
+      voiceSessionIdRef.current = currentVoiceSessionId
+
       const res = await fetch('https://voice-sip.studio.lyzr.ai/session/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentId: VOICE_AGENT_ID }),
+        body: JSON.stringify({ agentId: VOICE_AGENT_ID, userId, sessionId: currentVoiceSessionId }),
       })
 
       if (!res.ok) {
@@ -1927,7 +1949,7 @@ function VoiceScreen({
         status: 'pending_triage',
         startedAt: messages[0]?.timestamp || new Date().toISOString(),
         endedAt: new Date().toISOString(),
-        sessionId: 'voice_' + generateUUID().slice(0, 8),
+        sessionId: voiceSessionIdRef.current,
       }
       setConversations(prev => [conv, ...prev])
     }
@@ -2135,6 +2157,7 @@ function HistoryScreen({
   setTickets,
   activeAgentId,
   setActiveAgentId,
+  userId,
 }: {
   conversations: Conversation[]
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>
@@ -2142,6 +2165,7 @@ function HistoryScreen({
   setTickets: React.Dispatch<React.SetStateAction<Ticket[]>>
   activeAgentId: string | null
   setActiveAgentId: (id: string | null) => void
+  userId: string
 }) {
   const [channelFilter, setChannelFilter] = useState<'all' | 'chat' | 'voice'>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending_triage' | 'triaged' | 'escalated'>('all')
@@ -2173,7 +2197,8 @@ function HistoryScreen({
 
       const result = await callAIAgent(
         `Triage the following customer support conversation transcript:\n\n${transcript}`,
-        TRIAGE_AGENT_ID
+        TRIAGE_AGENT_ID,
+        { user_id: userId }
       )
 
       if (result.success) {
@@ -2693,6 +2718,7 @@ export default function Page() {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [sampleDataOn, setSampleDataOn] = useState(false)
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
+  const [userId] = useState(() => getOrCreateUserId())
 
   // Handle sample data toggle
   useEffect(() => {
@@ -2757,6 +2783,7 @@ export default function Page() {
                 onNavigate={setActiveScreen}
                 activeAgentId={activeAgentId}
                 setActiveAgentId={setActiveAgentId}
+                userId={userId}
               />
             )}
             {activeScreen === 'voice' && (
@@ -2767,6 +2794,7 @@ export default function Page() {
                 setTickets={setTickets}
                 activeAgentId={activeAgentId}
                 setActiveAgentId={setActiveAgentId}
+                userId={userId}
               />
             )}
             {activeScreen === 'history' && (
@@ -2777,6 +2805,7 @@ export default function Page() {
                 setTickets={setTickets}
                 activeAgentId={activeAgentId}
                 setActiveAgentId={setActiveAgentId}
+                userId={userId}
               />
             )}
             {activeScreen === 'tickets' && (
