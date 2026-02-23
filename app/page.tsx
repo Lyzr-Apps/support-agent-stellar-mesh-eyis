@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Label } from '@/components/ui/label'
-import { FiMessageSquare, FiPhone, FiHome, FiClock, FiTag, FiUpload, FiSend, FiMic, FiMicOff, FiPhoneOff, FiSearch, FiChevronRight, FiChevronDown, FiChevronUp, FiUser, FiHeadphones, FiAlertTriangle, FiCheck, FiX, FiExternalLink } from 'react-icons/fi'
+import { FiMessageSquare, FiPhone, FiHome, FiClock, FiTag, FiUpload, FiSend, FiMic, FiMicOff, FiPhoneOff, FiSearch, FiChevronRight, FiChevronDown, FiChevronUp, FiUser, FiHeadphones, FiAlertTriangle, FiCheck, FiX, FiExternalLink, FiDatabase, FiCpu, FiZap, FiLayers } from 'react-icons/fi'
 
 // ============================================================
 // CONSTANTS
@@ -83,38 +83,256 @@ interface Ticket {
 
 type NavScreen = 'dashboard' | 'chat' | 'voice' | 'history' | 'tickets' | 'knowledge'
 
+interface OrchestrationStep {
+  id: string
+  label: string
+  description: string
+  status: 'pending' | 'active' | 'completed'
+  icon: React.ReactNode
+  startedAt?: number
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
 
 function renderMarkdown(text: string) {
   if (!text) return null
-  return (
-    <div className="space-y-2">
-      {text.split('\n').map((line, i) => {
-        if (line.startsWith('### '))
-          return <h4 key={i} className="font-semibold text-sm mt-3 mb-1">{line.slice(4)}</h4>
-        if (line.startsWith('## '))
-          return <h3 key={i} className="font-semibold text-base mt-3 mb-1">{line.slice(3)}</h3>
-        if (line.startsWith('# '))
-          return <h2 key={i} className="font-bold text-lg mt-4 mb-2">{line.slice(2)}</h2>
-        if (line.startsWith('- ') || line.startsWith('* '))
-          return <li key={i} className="ml-4 list-disc text-sm">{formatInline(line.slice(2))}</li>
-        if (/^\d+\.\s/.test(line))
-          return <li key={i} className="ml-4 list-decimal text-sm">{formatInline(line.replace(/^\d+\.\s/, ''))}</li>
-        if (!line.trim()) return <div key={i} className="h-1" />
-        return <p key={i} className="text-sm leading-relaxed">{formatInline(line)}</p>
-      })}
-    </div>
-  )
+
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Code block
+    if (line.trim().startsWith('```')) {
+      const lang = line.trim().slice(3).trim()
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      i++ // skip closing ```
+      elements.push(
+        <div key={`code-${elements.length}`} className="my-3 rounded-lg overflow-hidden border border-border/50">
+          {lang && <div className="bg-muted px-3 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-b border-border/50">{lang}</div>}
+          <pre className="bg-muted/50 px-3 py-2.5 overflow-x-auto">
+            <code className="text-xs font-mono leading-relaxed">{codeLines.join('\n')}</code>
+          </pre>
+        </div>
+      )
+      continue
+    }
+
+    // Table detection
+    if (line.includes('|') && line.trim().startsWith('|')) {
+      const tableRows: string[] = [line]
+      let j = i + 1
+      while (j < lines.length && lines[j].includes('|') && lines[j].trim().startsWith('|')) {
+        tableRows.push(lines[j])
+        j++
+      }
+      if (tableRows.length >= 2) {
+        const headerCells = tableRows[0].split('|').filter(c => c.trim()).map(c => c.trim())
+        const isSeparator = (r: string) => r.split('|').filter(c => c.trim()).every(c => /^[-:]+$/.test(c.trim()))
+        const startIdx = isSeparator(tableRows[1]) ? 2 : 1
+        const bodyRows = tableRows.slice(startIdx)
+        elements.push(
+          <div key={`table-${elements.length}`} className="my-3 overflow-x-auto rounded-lg border border-border/50">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/50">
+                  {headerCells.map((cell, ci) => (
+                    <th key={ci} className="px-3 py-2 text-left text-xs font-semibold text-foreground border-b border-border/50">{formatInline(cell)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bodyRows.map((row, ri) => {
+                  const cells = row.split('|').filter(c => c.trim()).map(c => c.trim())
+                  return (
+                    <tr key={ri} className={ri % 2 === 0 ? '' : 'bg-muted/20'}>
+                      {cells.map((cell, ci) => (
+                        <td key={ci} className="px-3 py-1.5 text-xs border-b border-border/30">{formatInline(cell)}</td>
+                      ))}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+        i = j
+        continue
+      }
+    }
+
+    // Horizontal rule
+    if (/^[-*_]{3,}\s*$/.test(line.trim())) {
+      elements.push(<hr key={`hr-${elements.length}`} className="my-3 border-border/50" />)
+      i++
+      continue
+    }
+
+    // Blockquote
+    if (line.trimStart().startsWith('> ')) {
+      const quoteLines: string[] = []
+      while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
+        quoteLines.push(lines[i].trimStart().slice(2))
+        i++
+      }
+      elements.push(
+        <blockquote key={`bq-${elements.length}`} className="my-2 border-l-2 border-primary/40 pl-3 py-1 text-sm italic text-muted-foreground bg-muted/20 rounded-r-md">
+          {quoteLines.map((ql, qi) => <p key={qi} className="leading-relaxed">{formatInline(ql)}</p>)}
+        </blockquote>
+      )
+      continue
+    }
+
+    // Headers
+    if (line.startsWith('#### ')) {
+      elements.push(<h5 key={`h5-${elements.length}`} className="font-semibold text-xs mt-3 mb-1 uppercase tracking-wider text-muted-foreground">{formatInline(line.slice(5))}</h5>)
+      i++
+      continue
+    }
+    if (line.startsWith('### ')) {
+      elements.push(<h4 key={`h4-${elements.length}`} className="font-semibold text-sm mt-3 mb-1">{formatInline(line.slice(4))}</h4>)
+      i++
+      continue
+    }
+    if (line.startsWith('## ')) {
+      elements.push(<h3 key={`h3-${elements.length}`} className="font-semibold text-base mt-4 mb-1.5">{formatInline(line.slice(3))}</h3>)
+      i++
+      continue
+    }
+    if (line.startsWith('# ')) {
+      elements.push(<h2 key={`h2-${elements.length}`} className="font-bold text-lg mt-4 mb-2 font-serif">{formatInline(line.slice(2))}</h2>)
+      i++
+      continue
+    }
+
+    // Unordered list
+    if (/^[\s]*[-*+]\s/.test(line)) {
+      const listItems: string[] = []
+      while (i < lines.length && /^[\s]*[-*+]\s/.test(lines[i])) {
+        listItems.push(lines[i].replace(/^[\s]*[-*+]\s/, ''))
+        i++
+      }
+      elements.push(
+        <ul key={`ul-${elements.length}`} className="my-1.5 space-y-1">
+          {listItems.map((li, idx) => (
+            <li key={idx} className="flex items-start gap-2 text-sm leading-relaxed">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-2 flex-shrink-0" />
+              <span>{formatInline(li)}</span>
+            </li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+
+    // Ordered list
+    if (/^\s*\d+\.\s/.test(line)) {
+      const listItems: string[] = []
+      while (i < lines.length && /^\s*\d+\.\s/.test(lines[i])) {
+        listItems.push(lines[i].replace(/^\s*\d+\.\s/, ''))
+        i++
+      }
+      elements.push(
+        <ol key={`ol-${elements.length}`} className="my-1.5 space-y-1">
+          {listItems.map((li, idx) => (
+            <li key={idx} className="flex items-start gap-2 text-sm leading-relaxed">
+              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center mt-0.5 flex-shrink-0">{idx + 1}</span>
+              <span>{formatInline(li)}</span>
+            </li>
+          ))}
+        </ol>
+      )
+      continue
+    }
+
+    // Empty line
+    if (!line.trim()) {
+      elements.push(<div key={`br-${elements.length}`} className="h-1.5" />)
+      i++
+      continue
+    }
+
+    // Regular paragraph
+    elements.push(<p key={`p-${elements.length}`} className="text-sm leading-relaxed">{formatInline(line)}</p>)
+    i++
+  }
+
+  return <div className="space-y-1">{elements}</div>
 }
 
-function formatInline(text: string) {
-  const parts = text.split(/\*\*(.*?)\*\*/g)
-  if (parts.length === 1) return text
-  return parts.map((part, i) =>
-    i % 2 === 1 ? <strong key={i} className="font-semibold">{part}</strong> : part
-  )
+function formatInline(text: string): React.ReactNode {
+  if (!text) return text
+
+  // Process inline formatting: bold, italic, code, links, URLs
+  const parts: React.ReactNode[] = []
+
+  // Regex to find markdown links, URLs, bold, italic, inline code
+  const regex = /(\[([^\]]+)\]\(([^)]+)\))|(https?:\/\/[^\s<>\])"]+)|(`[^`]+`)|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)|(__([^_]+)__)|(_([^_]+)_)/g
+
+  let lastIndex = 0
+  let match
+  let keyCounter = 0
+
+  while ((match = regex.exec(text)) !== null) {
+    // Add text before match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+
+    if (match[1]) {
+      // Markdown link [text](url)
+      const linkText = match[2]
+      const url = match[3]
+      parts.push(
+        <a key={`link-${keyCounter++}`} href={url} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 decoration-primary/40 hover:decoration-primary inline-flex items-center gap-0.5 font-medium">
+          {linkText}<FiExternalLink className="w-3 h-3 inline ml-0.5 opacity-60" />
+        </a>
+      )
+    } else if (match[4]) {
+      // Auto-detected URL
+      const url = match[4]
+      const displayUrl = url.length > 50 ? url.slice(0, 47) + '...' : url
+      parts.push(
+        <a key={`url-${keyCounter++}`} href={url} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 decoration-primary/40 hover:decoration-primary inline-flex items-center gap-0.5 text-sm">
+          {displayUrl}<FiExternalLink className="w-3 h-3 inline ml-0.5 opacity-60" />
+        </a>
+      )
+    } else if (match[5]) {
+      // Inline code
+      const code = match[5].slice(1, -1)
+      parts.push(<code key={`code-${keyCounter++}`} className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono text-foreground/90">{code}</code>)
+    } else if (match[6]) {
+      // Bold **text**
+      parts.push(<strong key={`bold-${keyCounter++}`} className="font-semibold">{match[7]}</strong>)
+    } else if (match[8]) {
+      // Italic *text*
+      parts.push(<em key={`italic-${keyCounter++}`} className="italic">{match[9]}</em>)
+    } else if (match[10]) {
+      // Bold __text__
+      parts.push(<strong key={`bold2-${keyCounter++}`} className="font-semibold">{match[11]}</strong>)
+    } else if (match[12]) {
+      // Italic _text_
+      parts.push(<em key={`italic2-${keyCounter++}`} className="italic">{match[13]}</em>)
+    }
+
+    lastIndex = match.index + match[0].length
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.length === 1 ? parts[0] : <>{parts}</>
 }
 
 function parseAgentResponse(result: AIAgentResponse) {
@@ -180,6 +398,55 @@ function getStatusLabel(status: string): string {
   if (s === 'pending_triage') return 'Pending Triage'
   if (s === 'partially_resolved') return 'Partially Resolved'
   return (status || '').charAt(0).toUpperCase() + (status || '').slice(1)
+}
+
+function getReferencedLinks(category: string): { label: string; url: string }[] {
+  const baseLinks: Record<string, { label: string; url: string }[]> = {
+    login: [
+      { label: 'HDFC NetBanking Login', url: 'https://netbanking.hdfcbank.com' },
+      { label: 'Mobile Banking App Guide', url: 'https://www.hdfcbank.com/personal/ways-to-bank/mobile-banking' },
+      { label: 'Reset Password / IPIN', url: 'https://www.hdfcbank.com/personal/ways-to-bank/netbanking' },
+    ],
+    password_reset: [
+      { label: 'Reset IPIN Guide', url: 'https://www.hdfcbank.com/personal/ways-to-bank/netbanking' },
+      { label: 'Customer Care Contact', url: 'https://www.hdfcbank.com/personal/need-help/contact-us' },
+      { label: 'Branch Locator', url: 'https://www.hdfcbank.com/branch-atm-locator' },
+    ],
+    onboarding: [
+      { label: 'Open Account Online', url: 'https://www.hdfcbank.com/personal/save/accounts' },
+      { label: 'Account Types Comparison', url: 'https://www.hdfcbank.com/personal/save/accounts/savings-accounts' },
+      { label: 'KYC Requirements', url: 'https://www.hdfcbank.com/personal/need-help/kyc-centre' },
+      { label: 'Branch Locator', url: 'https://www.hdfcbank.com/branch-atm-locator' },
+    ],
+    product_info: [
+      { label: 'Savings Accounts', url: 'https://www.hdfcbank.com/personal/save/accounts/savings-accounts' },
+      { label: 'Credit Cards', url: 'https://www.hdfcbank.com/personal/pay/cards/credit-cards' },
+      { label: 'Home Loans', url: 'https://www.hdfcbank.com/personal/borrow/popular-loans/home-loan' },
+      { label: 'Fixed Deposits', url: 'https://www.hdfcbank.com/personal/save/deposits/fixed-deposit' },
+    ],
+    account_security: [
+      { label: 'Report Fraud', url: 'https://www.hdfcbank.com/personal/need-help/report-a-fraud' },
+      { label: 'Block Card Instantly', url: 'https://www.hdfcbank.com/personal/pay/cards/credit-cards' },
+      { label: 'Customer Care (24x7)', url: 'https://www.hdfcbank.com/personal/need-help/contact-us' },
+      { label: 'Security Tips', url: 'https://www.hdfcbank.com/personal/need-help/safe-banking' },
+    ],
+    transactions: [
+      { label: 'Fund Transfer (NEFT/RTGS/IMPS)', url: 'https://www.hdfcbank.com/personal/pay/money-transfer' },
+      { label: 'UPI Payments', url: 'https://www.hdfcbank.com/personal/pay/money-transfer/upi' },
+      { label: 'Transaction Limits', url: 'https://www.hdfcbank.com/personal/ways-to-bank/netbanking' },
+    ],
+    account: [
+      { label: 'Account Statement', url: 'https://www.hdfcbank.com/personal/ways-to-bank/netbanking' },
+      { label: 'Update Contact Details', url: 'https://www.hdfcbank.com/personal/need-help/contact-us' },
+      { label: 'Demat Account', url: 'https://www.hdfcbank.com/personal/invest/demat-account' },
+    ],
+    general: [
+      { label: 'HDFC Bank Homepage', url: 'https://www.hdfcbank.com' },
+      { label: 'Customer Support', url: 'https://www.hdfcbank.com/personal/need-help/contact-us' },
+      { label: 'FAQs', url: 'https://www.hdfcbank.com/personal/need-help/faqs' },
+    ],
+  }
+  return baseLinks[category] || baseLinks['general']
 }
 
 // Sample data for the toggle
@@ -556,6 +823,111 @@ function DashboardScreen({
 }
 
 // ============================================================
+// ORCHESTRATION PANEL
+// ============================================================
+function OrchestrationPanel({ agentType }: { agentType: 'chat' | 'triage' }) {
+  const [steps, setSteps] = useState<OrchestrationStep[]>([])
+  const [elapsedTime, setElapsedTime] = useState(0)
+  const startTimeRef = useRef(Date.now())
+
+  useEffect(() => {
+    startTimeRef.current = Date.now()
+    const timer = setInterval(() => {
+      setElapsedTime(Math.floor((Date.now() - startTimeRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const chatSteps: OrchestrationStep[] = [
+      { id: 'receive', label: 'Receiving Query', description: 'Processing customer message input', status: 'completed', icon: <FiMessageSquare className="w-3.5 h-3.5" /> },
+      { id: 'kb_search', label: 'Knowledge Base Search', description: 'Searching SOPs, FAQs, and product documentation', status: 'active', icon: <FiDatabase className="w-3.5 h-3.5" /> },
+      { id: 'context', label: 'Context Analysis', description: 'Analyzing conversation history and query intent', status: 'pending', icon: <FiLayers className="w-3.5 h-3.5" /> },
+      { id: 'generate', label: 'Response Generation', description: 'Composing structured response with references', status: 'pending', icon: <FiCpu className="w-3.5 h-3.5" /> },
+      { id: 'classify', label: 'Issue Classification', description: 'Categorizing issue and determining escalation need', status: 'pending', icon: <FiTag className="w-3.5 h-3.5" /> },
+      { id: 'deliver', label: 'Delivering Response', description: 'Formatting and sending agent response', status: 'pending', icon: <FiZap className="w-3.5 h-3.5" /> },
+    ]
+    const triageSteps: OrchestrationStep[] = [
+      { id: 'ingest', label: 'Ingesting Transcript', description: 'Loading full conversation transcript', status: 'completed', icon: <FiClock className="w-3.5 h-3.5" /> },
+      { id: 'analyze', label: 'Issue Analysis', description: 'Extracting key issues and customer sentiment', status: 'active', icon: <FiCpu className="w-3.5 h-3.5" /> },
+      { id: 'classify', label: 'Priority Classification', description: 'Assigning priority level and category', status: 'pending', icon: <FiLayers className="w-3.5 h-3.5" /> },
+      { id: 'ticket', label: 'Creating HubSpot Ticket', description: 'Generating structured ticket in HubSpot', status: 'pending', icon: <FiTag className="w-3.5 h-3.5" /> },
+      { id: 'escalation', label: 'Escalation Check', description: 'Determining if L2 escalation is required', status: 'pending', icon: <FiAlertTriangle className="w-3.5 h-3.5" /> },
+      { id: 'complete', label: 'Finalizing', description: 'Completing triage and returning results', status: 'pending', icon: <FiCheck className="w-3.5 h-3.5" /> },
+    ]
+    setSteps(agentType === 'chat' ? chatSteps : triageSteps)
+
+    // Simulate step progression
+    const timers: ReturnType<typeof setTimeout>[] = []
+    const stepList = agentType === 'chat' ? chatSteps : triageSteps
+    stepList.forEach((_step, index) => {
+      if (index >= 1) {
+        timers.push(setTimeout(() => {
+          setSteps(prev => prev.map((s, si) => ({
+            ...s,
+            status: si < index ? 'completed' as const : si === index ? 'active' as const : 'pending' as const
+          })))
+        }, index * 2500))
+      }
+    })
+    return () => timers.forEach(t => clearTimeout(t))
+  }, [agentType])
+
+  return (
+    <div className="flex justify-start">
+      <div className="bg-secondary/80 rounded-2xl rounded-bl-md px-4 py-3 max-w-[85%] w-full">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+            <span className="text-xs font-semibold text-foreground">Agent Processing</span>
+          </div>
+          <span className="text-[10px] font-mono text-muted-foreground">{elapsedTime}s</span>
+        </div>
+        <div className="space-y-1.5">
+          {steps.map((step) => (
+            <div key={step.id} className={cn(
+              'flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-all duration-500',
+              step.status === 'active' ? 'bg-primary/10 border border-primary/20' :
+              step.status === 'completed' ? 'bg-green-50/80 border border-green-200/50' :
+              'opacity-50'
+            )}>
+              <div className={cn(
+                'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors',
+                step.status === 'active' ? 'bg-primary text-primary-foreground' :
+                step.status === 'completed' ? 'bg-green-600 text-white' :
+                'bg-muted text-muted-foreground'
+              )}>
+                {step.status === 'completed' ? <FiCheck className="w-3 h-3" /> :
+                 step.status === 'active' ? <div className="w-2 h-2 rounded-full bg-primary-foreground animate-ping" /> :
+                 step.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={cn(
+                  'text-xs font-medium leading-tight',
+                  step.status === 'active' ? 'text-primary' :
+                  step.status === 'completed' ? 'text-green-700' :
+                  'text-muted-foreground'
+                )}>{step.label}</p>
+                {step.status === 'active' && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{step.description}</p>
+                )}
+              </div>
+              {step.status === 'active' && (
+                <div className="flex gap-0.5">
+                  <div className="w-1 h-1 rounded-full bg-primary animate-bounce" />
+                  <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
 // CHAT SCREEN
 // ============================================================
 function ChatScreen({
@@ -721,19 +1093,48 @@ function ChatScreen({
             <div className="space-y-4 pb-4">
               {currentConversation.messages.map(msg => (
                 <div key={msg.id} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
-                  <div className={cn('max-w-[75%] rounded-2xl px-4 py-3', msg.role === 'user' ? 'bg-primary text-primary-foreground rounded-br-md' : 'bg-secondary text-secondary-foreground rounded-bl-md')}>
+                  <div className={cn('max-w-[80%] rounded-2xl px-4 py-3', msg.role === 'user' ? 'bg-primary text-primary-foreground rounded-br-md' : 'bg-secondary text-secondary-foreground rounded-bl-md')}>
                     <div className="text-sm leading-relaxed">{renderMarkdown(msg.content)}</div>
+                    {msg.role === 'agent' && msg.metadata?.issue_category && (
+                      <div className="mt-2.5 pt-2.5 border-t border-border/30">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                          <FiExternalLink className="w-3 h-3" />
+                          Referenced Links
+                        </p>
+                        <div className="space-y-1">
+                          {getReferencedLinks(msg.metadata.issue_category).map((link, li) => (
+                            <a
+                              key={li}
+                              href={link.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-xs text-primary hover:underline underline-offset-2 group py-0.5"
+                            >
+                              <FiChevronRight className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                              <span>{link.label}</span>
+                              <FiExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className={cn('flex items-center gap-2 mt-2', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                       <span className={cn('text-xs', msg.role === 'user' ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
                         {formatTimestamp(msg.timestamp)}
                       </span>
                       {msg.metadata?.issue_category && (
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-background/50 border-border/50">
-                          {msg.metadata.issue_category}
+                          {msg.metadata.issue_category.replace(/_/g, ' ')}
+                        </Badge>
+                      )}
+                      {msg.metadata?.resolution_status && (
+                        <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0 h-4 border', getStatusColor(msg.metadata.resolution_status))}>
+                          {getStatusLabel(msg.metadata.resolution_status)}
                         </Badge>
                       )}
                       {msg.metadata?.escalation_needed && (
                         <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4">
+                          <FiAlertTriangle className="w-2.5 h-2.5 mr-0.5" />
                           Escalation
                         </Badge>
                       )}
@@ -741,20 +1142,7 @@ function ChatScreen({
                   </div>
                 </div>
               ))}
-              {loading && (
-                <div className="flex justify-start">
-                  <div className="bg-secondary rounded-2xl rounded-bl-md px-4 py-3 max-w-[75%]">
-                    <div className="flex items-center gap-2">
-                      <div className="flex gap-1">
-                        <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" />
-                        <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '300ms' }} />
-                      </div>
-                      <span className="text-xs text-muted-foreground ml-1">Agent is typing...</span>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {loading && <OrchestrationPanel agentType="chat" />}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -1459,6 +1847,12 @@ function HistoryScreen({
                             <div className="text-sm">{renderMarkdown(conv.triageResult.recommended_actions)}</div>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {triagingId === conv.id && (
+                      <div className="p-4 border-t border-border/30">
+                        <OrchestrationPanel agentType="triage" />
                       </div>
                     )}
 
