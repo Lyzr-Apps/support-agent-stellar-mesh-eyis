@@ -1,0 +1,40 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "ChatSupportResponse",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "response_message": {
+          "type": "string",
+          "description": "The support agent's response to the customer"
+        },
+        "issue_category": {
+          "type": "string",
+          "description": "Category of the issue: onboarding, login, password_reset, product_info, account, general"
+        },
+        "resolution_status": {
+          "type": "string",
+          "description": "Status: resolved, partially_resolved, unresolved, needs_escalation"
+        },
+        "escalation_needed": {
+          "type": "boolean",
+          "description": "Whether this issue needs L2 escalation"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Brief summary of the issue and current status"
+        }
+      },
+      "required": [
+        "response_message",
+        "issue_category",
+        "resolution_status",
+        "escalation_needed",
+        "summary"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

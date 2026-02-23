@@ -1,0 +1,40 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "VoiceSupportResponse",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "response_message": {
+          "type": "string",
+          "description": "The voice agent's spoken response"
+        },
+        "issue_category": {
+          "type": "string",
+          "description": "Category: onboarding, login, password_reset, product_info, account, general"
+        },
+        "resolution_status": {
+          "type": "string",
+          "description": "Status: resolved, partially_resolved, unresolved, needs_escalation"
+        },
+        "escalation_needed": {
+          "type": "boolean",
+          "description": "Whether L2 escalation is needed"
+        },
+        "call_summary": {
+          "type": "string",
+          "description": "Brief summary of the call and resolution status"
+        }
+      },
+      "required": [
+        "response_message",
+        "issue_category",
+        "resolution_status",
+        "escalation_needed",
+        "call_summary"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

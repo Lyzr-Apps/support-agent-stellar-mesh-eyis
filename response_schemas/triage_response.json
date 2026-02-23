@@ -1,0 +1,65 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "TriageResponse",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "ticket_subject": {
+          "type": "string",
+          "description": "Subject line for the support ticket"
+        },
+        "priority": {
+          "type": "string",
+          "description": "Priority level: Low, Medium, High, Critical"
+        },
+        "category": {
+          "type": "string",
+          "description": "Issue category: onboarding, login, password_reset, product_info, account_security, transactions, loans, cards, general"
+        },
+        "issue_summary": {
+          "type": "string",
+          "description": "Detailed summary of the customer issue"
+        },
+        "resolution_status": {
+          "type": "string",
+          "description": "Current status: resolved, unresolved, partially_resolved"
+        },
+        "escalation_needed": {
+          "type": "boolean",
+          "description": "Whether L2 escalation is required"
+        },
+        "escalation_reason": {
+          "type": "string",
+          "description": "Why escalation is needed, empty if not needed"
+        },
+        "recommended_actions": {
+          "type": "string",
+          "description": "Recommended next steps for L2 team"
+        },
+        "ticket_created": {
+          "type": "boolean",
+          "description": "Whether a HubSpot ticket was successfully created"
+        },
+        "hubspot_ticket_id": {
+          "type": "string",
+          "description": "The HubSpot ticket ID if created, empty otherwise"
+        }
+      },
+      "required": [
+        "ticket_subject",
+        "priority",
+        "category",
+        "issue_summary",
+        "resolution_status",
+        "escalation_needed",
+        "escalation_reason",
+        "recommended_actions",
+        "ticket_created",
+        "hubspot_ticket_id"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

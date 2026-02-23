@@ -1,0 +1,22 @@
+{
+  "agent_name": "Chat Support Agent",
+  "agent_id": "699bf65a69f2efc6b10174af",
+  "description": "Handles customer text chat queries by searching the HDFC Bank knowledge base (SOPs, FAQs, product info, onboarding, login/password docs). Provides accurate L1 support responses and identifies when escalation is needed.",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "response_message": "string",
+    "issue_category": "string",
+    "resolution_status": "string",
+    "escalation_needed": "boolean",
+    "summary": "string"
+  },
+  "example_response": {
+    "response_message": "The support agent's response to the customer",
+    "issue_category": "Category of the issue: onboarding, login, password_reset, product_info, account, general",
+    "resolution_status": "Status: resolved, partially_resolved, unresolved, needs_escalation",
+    "escalation_needed": false,
+    "summary": "Brief summary of the issue and current status"
+  }
+}

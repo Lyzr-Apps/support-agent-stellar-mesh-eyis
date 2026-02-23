@@ -1,0 +1,32 @@
+{
+  "agents": {
+    "chat_support": {
+      "agent_id": "699bf65a69f2efc6b10174af",
+      "name": "Chat Support Agent",
+      "type": "chat_with_kb",
+      "has_voice": false,
+      "has_kb": true,
+      "rag_id": "699bf644b45a5c2df18cc0f6"
+    },
+    "voice_support": {
+      "agent_id": "699bf66a2cac6aad5e1e40aa",
+      "name": "Voice Support Agent",
+      "type": "voice_with_kb",
+      "has_voice": true,
+      "has_kb": true,
+      "rag_id": "699bf644b45a5c2df18cc0f6"
+    },
+    "triage": {
+      "agent_id": "699bf6950cb4051b002d371a",
+      "name": "Ticket Triage & Escalation Agent",
+      "type": "chat_with_tools",
+      "has_voice": false,
+      "has_kb": false,
+      "tools": ["HUBSPOT_CREATE_TICKET", "HUBSPOT_FETCH_CONTACT_DETAILS_BY_ID"]
+    }
+  },
+  "knowledge_base": {
+    "rag_id": "699bf644b45a5c2df18cc0f6",
+    "name": "HDFC Bank Support KB"
+  }
+}

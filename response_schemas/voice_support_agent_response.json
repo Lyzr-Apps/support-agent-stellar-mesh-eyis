@@ -1,0 +1,8 @@
+{
+  "agent_name": "Voice Support Agent",
+  "agent_id": "699bf66a2cac6aad5e1e40aa",
+  "description": "Handles inbound customer voice calls, answering queries about onboarding, products, app login, password resets using the HDFC Bank knowledge base. Operates via speech-to-text and text-to-speech.",
+  "agent_type": "voice",
+  "accessor": "websocket",
+  "auto_generated": true
+}

@@ -1,0 +1,32 @@
+{
+  "agent_name": "Ticket Triage & Escalation Agent",
+  "agent_id": "699bf6950cb4051b002d371a",
+  "description": "Analyzes completed conversation transcripts to extract issue summary, assign ticket priority, categorize the issue, and create a structured ticket in HubSpot. Escalates to L2 team when needed.",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "ticket_subject": "string",
+    "priority": "string",
+    "category": "string",
+    "issue_summary": "string",
+    "resolution_status": "string",
+    "escalation_needed": "boolean",
+    "escalation_reason": "string",
+    "recommended_actions": "string",
+    "ticket_created": "boolean",
+    "hubspot_ticket_id": "string"
+  },
+  "example_response": {
+    "ticket_subject": "Subject line for the support ticket",
+    "priority": "Priority level: Low, Medium, High, Critical",
+    "category": "Issue category: onboarding, login, password_reset, product_info, account_security, transactions, loans, cards, general",
+    "issue_summary": "Detailed summary of the customer issue",
+    "resolution_status": "Current status: resolved, unresolved, partially_resolved",
+    "escalation_needed": false,
+    "escalation_reason": "Why escalation is needed, empty if not needed",
+    "recommended_actions": "Recommended next steps for L2 team",
+    "ticket_created": false,
+    "hubspot_ticket_id": "The HubSpot ticket ID if created, empty otherwise"
+  }
+}
