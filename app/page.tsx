@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Label } from '@/components/ui/label'
-import { FiMessageSquare, FiPhone, FiHome, FiClock, FiTag, FiUpload, FiSend, FiMic, FiMicOff, FiPhoneOff, FiSearch, FiChevronRight, FiChevronDown, FiChevronUp, FiUser, FiHeadphones, FiAlertTriangle, FiCheck, FiX, FiExternalLink, FiDatabase, FiCpu, FiZap, FiLayers } from 'react-icons/fi'
+import { FiMessageSquare, FiPhone, FiHome, FiClock, FiTag, FiUpload, FiSend, FiMic, FiMicOff, FiPhoneOff, FiSearch, FiChevronRight, FiChevronDown, FiChevronUp, FiUser, FiHeadphones, FiAlertTriangle, FiCheck, FiX, FiExternalLink, FiDatabase, FiCpu, FiZap, FiLayers, FiFileText, FiActivity } from 'react-icons/fi'
 
 // ============================================================
 // CONSTANTS
@@ -90,6 +90,21 @@ interface OrchestrationStep {
   status: 'pending' | 'active' | 'completed'
   icon: React.ReactNode
   startedAt?: number
+}
+
+interface TicketProperties {
+  customerName: string
+  customerEmail: string
+  primaryIssue: string
+  priority: 'Low' | 'Medium' | 'High' | 'Critical'
+  category: string
+  sentiment: 'Positive' | 'Neutral' | 'Negative' | 'Frustrated'
+  sentimentScore: number
+  summary: string
+  referencedKBLinks: { label: string; url: string }[]
+  escalationNeeded: boolean
+  escalationReason: string
+  recommendedActions: string
 }
 
 // ============================================================
@@ -447,6 +462,398 @@ function getReferencedLinks(category: string): { label: string; url: string }[] 
     ],
   }
   return baseLinks[category] || baseLinks['general']
+}
+
+// ============================================================
+// FRONT-END TRIAGE ANALYSIS (no external tools)
+// ============================================================
+function analyzeTranscriptForTicket(messages: Message[], channel: 'chat' | 'voice'): TicketProperties {
+  const allUserText = messages.filter(m => m.role === 'user').map(m => m.content).join(' ').toLowerCase()
+  const allAgentText = messages.filter(m => m.role === 'agent').map(m => m.content).join(' ').toLowerCase()
+  const fullText = allUserText + ' ' + allAgentText
+  const lastAgentMsg = [...messages].reverse().find(m => m.role === 'agent')
+  const lastMeta = lastAgentMsg?.metadata
+
+  // Extract category from metadata or text analysis
+  let category = lastMeta?.issue_category || 'general'
+  if (category === 'general') {
+    if (/login|sign.?in|log.?in|ipin|password|otp/.test(allUserText)) category = 'login'
+    else if (/password|reset|forgot|ipin/.test(allUserText)) category = 'password_reset'
+    else if (/open.?account|new.?account|onboard|kyc|register/.test(allUserText)) category = 'onboarding'
+    else if (/credit.?card|debit.?card|home.?loan|fixed.?deposit|savings|product|interest.?rate/.test(allUserText)) category = 'product_info'
+    else if (/fraud|stolen|unauthorized|hack|security|block.?card/.test(allUserText)) category = 'account_security'
+    else if (/transfer|neft|rtgs|imps|upi|payment|transaction/.test(allUserText)) category = 'transactions'
+    else if (/account|statement|balance|details/.test(allUserText)) category = 'account'
+  }
+
+  // Determine priority
+  let priority: TicketProperties['priority'] = 'Medium'
+  if (/fraud|stolen|unauthorized|hack|security.?breach|blocked|locked|urgent|immediately/.test(allUserText)) priority = 'Critical'
+  else if (/failed|error|not.?working|broken|unable|can.?t|cannot|issue|problem/.test(allUserText)) priority = 'High'
+  else if (/help|how.?to|guide|question|info/.test(allUserText)) priority = 'Low'
+
+  // Sentiment analysis
+  let sentiment: TicketProperties['sentiment'] = 'Neutral'
+  let sentimentScore = 50
+  const negativeWords = (allUserText.match(/angry|frustrated|upset|terrible|horrible|worst|hate|annoyed|disappointed|unacceptable|ridiculous|stupid|useless|pathetic|disgusted/g) || []).length
+  const positiveWords = (allUserText.match(/thanks|thank|great|good|helpful|appreciate|excellent|wonderful|perfect|amazing/g) || []).length
+  const urgentWords = (allUserText.match(/urgent|immediately|asap|emergency|critical|please.?help|desperate|stuck/g) || []).length
+
+  if (negativeWords >= 2 || urgentWords >= 2) { sentiment = 'Frustrated'; sentimentScore = 15 }
+  else if (negativeWords >= 1) { sentiment = 'Negative'; sentimentScore = 30 }
+  else if (positiveWords >= 2) { sentiment = 'Positive'; sentimentScore = 85 }
+  else if (positiveWords >= 1) { sentiment = 'Positive'; sentimentScore = 70 }
+
+  // Determine escalation
+  const escalationNeeded = lastMeta?.escalation_needed ||
+    priority === 'Critical' ||
+    sentiment === 'Frustrated' ||
+    lastMeta?.resolution_status === 'needs_escalation' ||
+    lastMeta?.resolution_status === 'unresolved'
+
+  // Build primary issue summary
+  const firstUserMsg = messages.find(m => m.role === 'user')?.content || 'Customer inquiry'
+  const primaryIssue = lastMeta?.summary || firstUserMsg.slice(0, 120) + (firstUserMsg.length > 120 ? '...' : '')
+
+  // Get KB links
+  const referencedKBLinks = getReferencedLinks(category)
+
+  return {
+    customerName: '',
+    customerEmail: '',
+    primaryIssue,
+    priority,
+    category,
+    sentiment,
+    sentimentScore,
+    summary: `${channel === 'voice' ? 'Voice call' : 'Chat conversation'} with ${messages.length} messages. ${lastMeta?.summary || primaryIssue}`,
+    referencedKBLinks,
+    escalationNeeded: !!escalationNeeded,
+    escalationReason: escalationNeeded ? (lastMeta?.resolution_status === 'unresolved' ? 'Issue remains unresolved after L1 support' : priority === 'Critical' ? 'Critical priority issue requiring immediate L2 attention' : sentiment === 'Frustrated' ? 'Customer expressing high frustration - requires immediate human attention' : 'Agent recommended escalation during conversation') : '',
+    recommendedActions: escalationNeeded ? 'Assign to L2 specialist team. Review full transcript before contacting customer. Follow up within 2 hours for Critical priority.' : 'Ticket created for tracking. No immediate action required.',
+  }
+}
+
+function getSentimentColor(sentiment: string): string {
+  if (sentiment === 'Positive') return 'bg-green-100 text-green-800 border-green-300'
+  if (sentiment === 'Negative') return 'bg-orange-100 text-orange-800 border-orange-300'
+  if (sentiment === 'Frustrated') return 'bg-red-100 text-red-800 border-red-300'
+  return 'bg-blue-100 text-blue-800 border-blue-300'
+}
+
+function getSentimentBarColor(sentiment: string): string {
+  if (sentiment === 'Positive') return 'bg-green-500'
+  if (sentiment === 'Negative') return 'bg-orange-500'
+  if (sentiment === 'Frustrated') return 'bg-red-500'
+  return 'bg-blue-500'
+}
+
+// ============================================================
+// CONVERT TO TICKET MODAL
+// ============================================================
+function ConvertToTicketModal({
+  open,
+  onClose,
+  messages,
+  channel,
+  onTicketCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  messages: Message[]
+  channel: 'chat' | 'voice'
+  onTicketCreated: (ticket: Ticket, conversation: Conversation) => void
+}) {
+  const [ticketProps, setTicketProps] = useState<TicketProperties | null>(null)
+  const [customerName, setCustomerName] = useState('')
+  const [customerEmail, setCustomerEmail] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeStage, setAnalyzeStage] = useState(0)
+  const [created, setCreated] = useState(false)
+
+  useEffect(() => {
+    if (open && messages.length > 0) {
+      setAnalyzing(true)
+      setCreated(false)
+      setAnalyzeStage(0)
+      setCustomerName('')
+      setCustomerEmail('')
+
+      // Simulate orchestration stages
+      const stages = [1, 2, 3, 4, 5]
+      const timers = stages.map((stage, i) =>
+        setTimeout(() => setAnalyzeStage(stage), (i + 1) * 600)
+      )
+
+      // Run actual analysis after visual steps
+      const analyzeTimer = setTimeout(() => {
+        const result = analyzeTranscriptForTicket(messages, channel)
+        setTicketProps(result)
+        setAnalyzing(false)
+      }, 3200)
+
+      return () => {
+        timers.forEach(t => clearTimeout(t))
+        clearTimeout(analyzeTimer)
+      }
+    }
+  }, [open, messages, channel])
+
+  const handleCreateTicket = () => {
+    if (!ticketProps) return
+
+    const sessionId = 'ticket_' + generateUUID().slice(0, 8)
+    const conv: Conversation = {
+      id: generateUUID(),
+      channel,
+      messages,
+      status: ticketProps.escalationNeeded ? 'escalated' : 'triaged',
+      startedAt: messages[0]?.timestamp || new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      sessionId,
+      triageResult: {
+        ticket_subject: ticketProps.primaryIssue.slice(0, 80),
+        priority: ticketProps.priority,
+        category: ticketProps.category,
+        issue_summary: ticketProps.summary,
+        resolution_status: ticketProps.escalationNeeded ? 'unresolved' : 'resolved',
+        escalation_needed: ticketProps.escalationNeeded,
+        escalation_reason: ticketProps.escalationReason,
+        recommended_actions: ticketProps.recommendedActions,
+        ticket_created: true,
+        hubspot_ticket_id: 'TKT-' + Date.now().toString().slice(-6),
+      },
+    }
+
+    const ticket: Ticket = {
+      id: conv.triageResult!.hubspot_ticket_id,
+      conversationId: conv.id,
+      subject: `[${ticketProps.priority}] ${ticketProps.primaryIssue.slice(0, 80)}`,
+      priority: ticketProps.priority,
+      category: ticketProps.category,
+      summary: ticketProps.summary + (customerName ? `\n\nCustomer: ${customerName}` : '') + (customerEmail ? `\nEmail: ${customerEmail}` : '') + `\nSentiment: ${ticketProps.sentiment} (${ticketProps.sentimentScore}%)` + (ticketProps.escalationNeeded ? `\nEscalation Reason: ${ticketProps.escalationReason}` : ''),
+      status: ticketProps.escalationNeeded ? 'unresolved' : 'resolved',
+      escalated: ticketProps.escalationNeeded,
+      escalationReason: ticketProps.escalationReason,
+      recommendedActions: ticketProps.recommendedActions,
+      hubspotTicketId: conv.triageResult!.hubspot_ticket_id,
+      createdAt: new Date().toISOString(),
+    }
+
+    onTicketCreated(ticket, conv)
+    setCreated(true)
+  }
+
+  const analyzeStages = [
+    { label: 'Reading transcript', icon: <FiFileText className="w-3.5 h-3.5" /> },
+    { label: 'Analyzing sentiment', icon: <FiActivity className="w-3.5 h-3.5" /> },
+    { label: 'Classifying issue', icon: <FiLayers className="w-3.5 h-3.5" /> },
+    { label: 'Determining priority', icon: <FiAlertTriangle className="w-3.5 h-3.5" /> },
+    { label: 'Generating ticket', icon: <FiTag className="w-3.5 h-3.5" /> },
+  ]
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-serif text-xl flex items-center gap-2">
+            <FiFileText className="w-5 h-5 text-primary" />
+            Convert to Ticket
+          </DialogTitle>
+          <DialogDescription>
+            {analyzing ? 'Analyzing conversation transcript...' : created ? 'Ticket created successfully' : 'Review ticket properties and create a support ticket'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {analyzing ? (
+          <div className="py-6 space-y-3">
+            {analyzeStages.map((stage, i) => (
+              <div key={i} className={cn(
+                'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-500',
+                analyzeStage > i ? 'bg-green-50 border border-green-200/50' :
+                analyzeStage === i ? 'bg-primary/10 border border-primary/20' :
+                'opacity-40'
+              )}>
+                <div className={cn(
+                  'w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0',
+                  analyzeStage > i ? 'bg-green-600 text-white' :
+                  analyzeStage === i ? 'bg-primary text-primary-foreground' :
+                  'bg-muted text-muted-foreground'
+                )}>
+                  {analyzeStage > i ? <FiCheck className="w-3 h-3" /> :
+                   analyzeStage === i ? <div className="w-2 h-2 rounded-full bg-primary-foreground animate-ping" /> :
+                   stage.icon}
+                </div>
+                <span className={cn(
+                  'text-sm font-medium',
+                  analyzeStage > i ? 'text-green-700' :
+                  analyzeStage === i ? 'text-primary' :
+                  'text-muted-foreground'
+                )}>{stage.label}</span>
+                {analyzeStage === i && (
+                  <div className="flex gap-0.5 ml-auto">
+                    <div className="w-1 h-1 rounded-full bg-primary animate-bounce" />
+                    <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-1 h-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : created ? (
+          <div className="py-8 text-center">
+            <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+              <FiCheck className="w-8 h-8 text-green-600" />
+            </div>
+            <h3 className="font-serif text-lg font-semibold mb-2">Ticket Created Successfully</h3>
+            <p className="text-sm text-muted-foreground mb-1">
+              Ticket ID: <span className="font-mono font-medium">{ticketProps ? 'TKT-' + Date.now().toString().slice(-6) : ''}</span>
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {ticketProps?.escalationNeeded ? 'This ticket has been marked for L2 escalation.' : 'The conversation has been saved and the ticket is ready for review.'}
+            </p>
+            <Button className="mt-6" onClick={onClose}>Close</Button>
+          </div>
+        ) : ticketProps ? (
+          <div className="space-y-5 mt-2">
+            {/* Customer Details */}
+            <div className="rounded-lg border border-border/50 p-4">
+              <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <FiUser className="w-4 h-4 text-primary" />
+                Customer Details
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="cust-name" className="text-xs text-muted-foreground">Customer Name</Label>
+                  <Input
+                    id="cust-name"
+                    placeholder="Enter customer name"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="mt-1 bg-background"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="cust-email" className="text-xs text-muted-foreground">Email Address</Label>
+                  <Input
+                    id="cust-email"
+                    type="email"
+                    placeholder="customer@email.com"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    className="mt-1 bg-background"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Issue & Classification */}
+            <div className="rounded-lg border border-border/50 p-4">
+              <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <FiTag className="w-4 h-4 text-primary" />
+                Issue Classification
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Primary Issue</p>
+                  <p className="text-sm font-medium">{ticketProps.primaryIssue}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge className={cn('text-xs', getPriorityColor(ticketProps.priority))}>{ticketProps.priority} Priority</Badge>
+                  <Badge variant="outline" className="text-xs">{ticketProps.category.replace(/_/g, ' ')}</Badge>
+                  {ticketProps.escalationNeeded && (
+                    <Badge variant="destructive" className="text-xs">
+                      <FiAlertTriangle className="w-3 h-3 mr-1" />
+                      Escalation Required
+                    </Badge>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Summary</p>
+                  <p className="text-sm text-foreground/80">{ticketProps.summary}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Sentiment Analysis */}
+            <div className="rounded-lg border border-border/50 p-4">
+              <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <FiActivity className="w-4 h-4 text-primary" />
+                Sentiment Analysis
+              </h4>
+              <div className="flex items-center gap-4">
+                <Badge variant="outline" className={cn('text-xs border px-3 py-1', getSentimentColor(ticketProps.sentiment))}>
+                  {ticketProps.sentiment}
+                </Badge>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-muted-foreground">Sentiment Score</span>
+                    <span className="text-[10px] font-mono font-semibold">{ticketProps.sentimentScore}%</span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={cn('h-full rounded-full transition-all duration-1000', getSentimentBarColor(ticketProps.sentiment))}
+                      style={{ width: `${ticketProps.sentimentScore}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              {ticketProps.sentiment === 'Frustrated' && (
+                <p className="text-xs text-red-600 mt-2 bg-red-50 px-3 py-1.5 rounded">
+                  <FiAlertTriangle className="w-3 h-3 inline mr-1" />
+                  Customer is expressing high frustration. Priority handling recommended.
+                </p>
+              )}
+            </div>
+
+            {/* Referenced KB Articles */}
+            <div className="rounded-lg border border-border/50 p-4">
+              <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <FiDatabase className="w-4 h-4 text-primary" />
+                Referenced KB Articles
+              </h4>
+              <div className="space-y-1.5">
+                {ticketProps.referencedKBLinks.map((link, i) => (
+                  <a
+                    key={i}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-sm text-primary hover:underline underline-offset-2 group py-0.5"
+                  >
+                    <FiChevronRight className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                    <span>{link.label}</span>
+                    <FiExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            {/* Escalation Info */}
+            {ticketProps.escalationNeeded && (
+              <div className="rounded-lg border border-red-200 bg-red-50/50 p-4">
+                <h4 className="text-sm font-semibold mb-2 text-red-700 flex items-center gap-2">
+                  <FiAlertTriangle className="w-4 h-4" />
+                  Escalation Details
+                </h4>
+                <p className="text-sm text-red-800 mb-2">{ticketProps.escalationReason}</p>
+                <p className="text-xs text-red-600">{ticketProps.recommendedActions}</p>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={handleCreateTicket} className="gap-2">
+                <FiFileText className="w-4 h-4" />
+                Create Ticket
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // Sample data for the toggle
@@ -933,12 +1340,16 @@ function OrchestrationPanel({ agentType }: { agentType: 'chat' | 'triage' }) {
 function ChatScreen({
   conversations,
   setConversations,
+  tickets,
+  setTickets,
   onNavigate,
   activeAgentId,
   setActiveAgentId,
 }: {
   conversations: Conversation[]
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>
+  tickets: Ticket[]
+  setTickets: React.Dispatch<React.SetStateAction<Ticket[]>>
   onNavigate: (screen: NavScreen) => void
   activeAgentId: string | null
   setActiveAgentId: (id: string | null) => void
@@ -947,6 +1358,7 @@ function ChatScreen({
   const [inputValue, setInputValue] = useState('')
   const [loading, setLoading] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
+  const [showTicketModal, setShowTicketModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [sessionId] = useState(() => 'session_' + generateUUID().slice(0, 8))
 
@@ -1056,6 +1468,12 @@ function ChatScreen({
               <div className="w-2 h-2 rounded-full bg-green-500 mr-1.5 animate-pulse" />
               Chat Agent Active
             </Badge>
+          )}
+          {currentConversation && currentConversation.messages.length >= 2 && (
+            <Button variant="outline" size="sm" onClick={() => setShowTicketModal(true)} className="text-primary border-primary/30 hover:bg-primary/10">
+              <FiFileText className="w-4 h-4 mr-1.5" />
+              Convert to Ticket
+            </Button>
           )}
           {currentConversation && (
             <Button variant="outline" size="sm" onClick={endConversation} className="text-destructive border-destructive/30 hover:bg-destructive/10">
@@ -1175,6 +1593,21 @@ function ChatScreen({
           </div>
         )}
       </Card>
+
+      {currentConversation && (
+        <ConvertToTicketModal
+          open={showTicketModal}
+          onClose={() => setShowTicketModal(false)}
+          messages={currentConversation.messages}
+          channel="chat"
+          onTicketCreated={(ticket, conv) => {
+            setTickets(prev => [ticket, ...prev])
+            setConversations(prev => [conv, ...prev])
+            setCurrentConversation(null)
+            setStatusMessage('Ticket created successfully. View in Tickets.')
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -1185,11 +1618,15 @@ function ChatScreen({
 function VoiceScreen({
   conversations,
   setConversations,
+  tickets,
+  setTickets,
   activeAgentId,
   setActiveAgentId,
 }: {
   conversations: Conversation[]
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>
+  tickets: Ticket[]
+  setTickets: React.Dispatch<React.SetStateAction<Ticket[]>>
   activeAgentId: string | null
   setActiveAgentId: (id: string | null) => void
 }) {
@@ -1199,6 +1636,7 @@ function VoiceScreen({
   const [transcriptEntries, setTranscriptEntries] = useState<{ role: 'user' | 'agent'; text: string; timestamp: string }[]>([])
   const [statusMessage, setStatusMessage] = useState('')
   const [thinkingText, setThinkingText] = useState('')
+  const [showTicketModal, setShowTicketModal] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -1531,6 +1969,12 @@ function VoiceScreen({
               )}
               {callStatus === 'ended' && (
                 <div className="flex gap-3">
+                  {transcriptEntries.length >= 2 && (
+                    <Button variant="outline" onClick={() => setShowTicketModal(true)} className="gap-2 text-primary border-primary/30 hover:bg-primary/10">
+                      <FiFileText className="w-4 h-4" />
+                      Convert to Ticket
+                    </Button>
+                  )}
                   <Button onClick={saveAndReset} className="gap-2">
                     <FiCheck className="w-4 h-4" />
                     Save & Close
@@ -1585,6 +2029,29 @@ function VoiceScreen({
           </CardContent>
         </Card>
       </div>
+
+      {transcriptEntries.length > 0 && (
+        <ConvertToTicketModal
+          open={showTicketModal}
+          onClose={() => setShowTicketModal(false)}
+          messages={transcriptEntries.map(entry => ({
+            id: generateUUID(),
+            role: entry.role,
+            content: entry.role === 'user' ? `[Voice] ${entry.text}` : entry.text,
+            timestamp: entry.timestamp,
+          }))}
+          channel="voice"
+          onTicketCreated={(ticket, conv) => {
+            setTickets(prev => [ticket, ...prev])
+            setConversations(prev => [conv, ...prev])
+            setCallStatus('idle')
+            setTranscriptEntries([])
+            setDuration(0)
+            setStatusMessage('Ticket created from voice call. View in Tickets.')
+            setThinkingText('')
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -2216,6 +2683,8 @@ export default function Page() {
               <ChatScreen
                 conversations={conversations}
                 setConversations={setConversations}
+                tickets={tickets}
+                setTickets={setTickets}
                 onNavigate={setActiveScreen}
                 activeAgentId={activeAgentId}
                 setActiveAgentId={setActiveAgentId}
@@ -2225,6 +2694,8 @@ export default function Page() {
               <VoiceScreen
                 conversations={conversations}
                 setConversations={setConversations}
+                tickets={tickets}
+                setTickets={setTickets}
                 activeAgentId={activeAgentId}
                 setActiveAgentId={setActiveAgentId}
               />
