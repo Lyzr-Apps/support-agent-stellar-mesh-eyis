@@ -665,7 +665,7 @@ function ConvertToTicketModal({
       // Simulate orchestration stages
       const stages = [1, 2, 3, 4, 5]
       const timers = stages.map((stage, i) =>
-        setTimeout(() => setAnalyzeStage(stage), (i + 1) * 600)
+        setTimeout(() => setAnalyzeStage(stage), (i + 1) * 350)
       )
 
       // Run actual analysis after visual steps
@@ -673,7 +673,7 @@ function ConvertToTicketModal({
         const result = analyzeTranscriptForTicket(messages, channel)
         setTicketProps(result)
         setAnalyzing(false)
-      }, 3200)
+      }, 1900)
 
       return () => {
         timers.forEach(t => clearTimeout(t))
@@ -1357,7 +1357,7 @@ function OrchestrationPanel({ agentType }: { agentType: 'chat' | 'triage' }) {
             ...s,
             status: si < index ? 'completed' as const : si === index ? 'active' as const : 'pending' as const
           })))
-        }, index * 2500))
+        }, index * 800))
       }
     })
     return () => timers.forEach(t => clearTimeout(t))

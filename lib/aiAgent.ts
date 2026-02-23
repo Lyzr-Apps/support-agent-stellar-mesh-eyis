@@ -128,7 +128,7 @@ export async function callAIAgent(
     let attempt = 0
 
     while (Date.now() - startTime < POLL_TIMEOUT_MS) {
-      const delay = Math.min(300 * Math.pow(1.5, attempt), 3000)
+      const delay = Math.min(200 * Math.pow(1.3, attempt), 2000)
       await new Promise(r => setTimeout(r, delay))
       attempt++
 
