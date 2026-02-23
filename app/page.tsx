@@ -118,6 +118,16 @@ function renderMarkdown(text: string) {
   const elements: React.ReactNode[] = []
   let i = 0
 
+  // Helper to detect indent level (for nested lists)
+  const getIndent = (ln: string): number => {
+    const m = ln.match(/^(\s*)/)
+    return m ? Math.floor(m[1].length / 2) : 0
+  }
+
+  // Helper to check if a line is a sub-item (indented bullet or number)
+  const isSubBullet = (ln: string): boolean => /^\s{2,}[-*+]\s/.test(ln)
+  const isSubNumber = (ln: string): boolean => /^\s{2,}\d+\.\s/.test(ln)
+
   while (i < lines.length) {
     const line = lines[i]
 
@@ -130,12 +140,12 @@ function renderMarkdown(text: string) {
         codeLines.push(lines[i])
         i++
       }
-      i++ // skip closing ```
+      i++
       elements.push(
         <div key={`code-${elements.length}`} className="my-3 rounded-lg overflow-hidden border border-border/50">
-          {lang && <div className="bg-muted px-3 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-b border-border/50">{lang}</div>}
-          <pre className="bg-muted/50 px-3 py-2.5 overflow-x-auto">
-            <code className="text-xs font-mono leading-relaxed">{codeLines.join('\n')}</code>
+          {lang && <div className="bg-muted px-3 py-1.5 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-b border-border/50">{lang}</div>}
+          <pre className="bg-muted/50 px-4 py-3 overflow-x-auto">
+            <code className="text-xs font-mono leading-relaxed whitespace-pre">{codeLines.join('\n')}</code>
           </pre>
         </div>
       )
@@ -187,7 +197,7 @@ function renderMarkdown(text: string) {
 
     // Horizontal rule
     if (/^[-*_]{3,}\s*$/.test(line.trim())) {
-      elements.push(<hr key={`hr-${elements.length}`} className="my-3 border-border/50" />)
+      elements.push(<hr key={`hr-${elements.length}`} className="my-4 border-border/40" />)
       i++
       continue
     }
@@ -200,7 +210,7 @@ function renderMarkdown(text: string) {
         i++
       }
       elements.push(
-        <blockquote key={`bq-${elements.length}`} className="my-2 border-l-2 border-primary/40 pl-3 py-1 text-sm italic text-muted-foreground bg-muted/20 rounded-r-md">
+        <blockquote key={`bq-${elements.length}`} className="my-3 border-l-[3px] border-primary/40 pl-4 py-2 text-sm text-muted-foreground bg-muted/15 rounded-r-lg">
           {quoteLines.map((ql, qi) => <p key={qi} className="leading-relaxed">{formatInline(ql)}</p>)}
         </blockquote>
       )
@@ -209,59 +219,75 @@ function renderMarkdown(text: string) {
 
     // Headers
     if (line.startsWith('#### ')) {
-      elements.push(<h5 key={`h5-${elements.length}`} className="font-semibold text-xs mt-3 mb-1 uppercase tracking-wider text-muted-foreground">{formatInline(line.slice(5))}</h5>)
+      elements.push(<h5 key={`h5-${elements.length}`} className="font-semibold text-xs mt-4 mb-1.5 uppercase tracking-wider text-muted-foreground">{formatInline(line.slice(5))}</h5>)
       i++
       continue
     }
     if (line.startsWith('### ')) {
-      elements.push(<h4 key={`h4-${elements.length}`} className="font-semibold text-sm mt-3 mb-1">{formatInline(line.slice(4))}</h4>)
+      elements.push(<h4 key={`h4-${elements.length}`} className="font-semibold text-sm mt-4 mb-1.5 text-foreground">{formatInline(line.slice(4))}</h4>)
       i++
       continue
     }
     if (line.startsWith('## ')) {
-      elements.push(<h3 key={`h3-${elements.length}`} className="font-semibold text-base mt-4 mb-1.5">{formatInline(line.slice(3))}</h3>)
+      elements.push(<h3 key={`h3-${elements.length}`} className="font-semibold text-base mt-5 mb-2 text-foreground">{formatInline(line.slice(3))}</h3>)
       i++
       continue
     }
     if (line.startsWith('# ')) {
-      elements.push(<h2 key={`h2-${elements.length}`} className="font-bold text-lg mt-4 mb-2 font-serif">{formatInline(line.slice(2))}</h2>)
+      elements.push(<h2 key={`h2-${elements.length}`} className="font-bold text-lg mt-5 mb-2 font-serif text-foreground">{formatInline(line.slice(2))}</h2>)
       i++
       continue
     }
 
-    // Unordered list
-    if (/^[\s]*[-*+]\s/.test(line)) {
-      const listItems: string[] = []
-      while (i < lines.length && /^[\s]*[-*+]\s/.test(lines[i])) {
-        listItems.push(lines[i].replace(/^[\s]*[-*+]\s/, ''))
-        i++
-      }
-      elements.push(
-        <ul key={`ul-${elements.length}`} className="my-1.5 space-y-1">
-          {listItems.map((li, idx) => (
-            <li key={idx} className="flex items-start gap-2 text-sm leading-relaxed">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary/60 mt-2 flex-shrink-0" />
-              <span>{formatInline(li)}</span>
-            </li>
-          ))}
-        </ul>
-      )
-      continue
-    }
-
-    // Ordered list
+    // Ordered list (with nested sub-items support)
     if (/^\s*\d+\.\s/.test(line)) {
-      const listItems: string[] = []
-      while (i < lines.length && /^\s*\d+\.\s/.test(lines[i])) {
-        listItems.push(lines[i].replace(/^\s*\d+\.\s/, ''))
+      interface ListItem {
+        text: string
+        subItems: { type: 'bullet' | 'number'; text: string }[]
+      }
+      const listItems: ListItem[] = []
+      while (i < lines.length && /^\s*\d+\.\s/.test(lines[i]) && !isSubNumber(lines[i])) {
+        const itemText = lines[i].replace(/^\s*\d+\.\s/, '')
+        const subItems: ListItem['subItems'] = []
         i++
+        // Collect sub-items (indented bullets or numbers under this numbered item)
+        while (i < lines.length && (isSubBullet(lines[i]) || isSubNumber(lines[i]) || /^\s{2,}[^\s]/.test(lines[i]))) {
+          if (isSubBullet(lines[i])) {
+            subItems.push({ type: 'bullet', text: lines[i].replace(/^\s*[-*+]\s/, '') })
+          } else if (isSubNumber(lines[i])) {
+            subItems.push({ type: 'number', text: lines[i].replace(/^\s*\d+\.\s/, '') })
+          } else {
+            // Continuation text under a list item
+            subItems.push({ type: 'bullet', text: lines[i].trim() })
+          }
+          i++
+        }
+        listItems.push({ text: itemText, subItems })
       }
       elements.push(
-        <ol key={`ol-${elements.length}`} className="my-1.5 space-y-1">
-          {listItems.map((li, idx) => (
-            <li key={idx} className="flex items-start gap-2 text-sm leading-relaxed">
-              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center mt-0.5 flex-shrink-0">{idx + 1}</span>
-              <span>{formatInline(li)}</span>
+        <ol key={`ol-${elements.length}`} className="my-2.5 space-y-2 pl-1">
+          {listItems.map((item, idx) => (
+            <li key={idx} className="flex items-start gap-3 text-sm leading-relaxed">
+              <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-[11px] font-bold flex items-center justify-center mt-0.5 flex-shrink-0 border border-primary/20">
+                {idx + 1}
+              </span>
+              <div className="flex-1 min-w-0 pt-0.5">
+                <span className="leading-relaxed">{formatInline(item.text)}</span>
+                {item.subItems.length > 0 && (
+                  <div className="mt-1.5 ml-0.5 space-y-1 border-l-2 border-muted pl-3">
+                    {item.subItems.map((sub, si) => (
+                      <div key={si} className="flex items-start gap-2 text-sm leading-relaxed">
+                        {sub.type === 'bullet' ? (
+                          <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 mt-[7px] flex-shrink-0" />
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground font-semibold mt-0.5 flex-shrink-0 w-4 text-right">{si + 1}.</span>
+                        )}
+                        <span className="text-foreground/80">{formatInline(sub.text)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </li>
           ))}
         </ol>
@@ -269,19 +295,62 @@ function renderMarkdown(text: string) {
       continue
     }
 
-    // Empty line
+    // Unordered list (with nested sub-items support)
+    if (/^[-*+]\s/.test(line.trimStart()) && !isSubBullet(line)) {
+      interface BulletItem {
+        text: string
+        subItems: string[]
+      }
+      const listItems: BulletItem[] = []
+      while (i < lines.length && /^[-*+]\s/.test(lines[i].trimStart()) && !isSubBullet(lines[i])) {
+        const itemText = lines[i].replace(/^[\s]*[-*+]\s/, '')
+        const subItems: string[] = []
+        i++
+        // Collect indented sub-items
+        while (i < lines.length && (isSubBullet(lines[i]) || isSubNumber(lines[i]))) {
+          subItems.push(lines[i].replace(/^\s*[-*+]\s/, '').replace(/^\s*\d+\.\s/, ''))
+          i++
+        }
+        listItems.push({ text: itemText, subItems })
+      }
+      elements.push(
+        <ul key={`ul-${elements.length}`} className="my-2.5 space-y-1.5 pl-1">
+          {listItems.map((item, idx) => (
+            <li key={idx} className="flex items-start gap-2.5 text-sm leading-relaxed">
+              <span className="w-2 h-2 rounded-full bg-primary/50 mt-[7px] flex-shrink-0 ring-2 ring-primary/10" />
+              <div className="flex-1 min-w-0">
+                <span className="leading-relaxed">{formatInline(item.text)}</span>
+                {item.subItems.length > 0 && (
+                  <div className="mt-1.5 ml-0.5 space-y-1 border-l-2 border-muted pl-3">
+                    {item.subItems.map((sub, si) => (
+                      <div key={si} className="flex items-start gap-2 text-sm leading-relaxed">
+                        <span className="w-1 h-1 rounded-full bg-muted-foreground/40 mt-[9px] flex-shrink-0" />
+                        <span className="text-foreground/80">{formatInline(sub)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+
+    // Empty line -- slightly more spacing for visual breathing room
     if (!line.trim()) {
-      elements.push(<div key={`br-${elements.length}`} className="h-1.5" />)
+      elements.push(<div key={`br-${elements.length}`} className="h-2" />)
       i++
       continue
     }
 
     // Regular paragraph
-    elements.push(<p key={`p-${elements.length}`} className="text-sm leading-relaxed">{formatInline(line)}</p>)
+    elements.push(<p key={`p-${elements.length}`} className="text-sm leading-[1.7]">{formatInline(line)}</p>)
     i++
   }
 
-  return <div className="space-y-1">{elements}</div>
+  return <div className="space-y-1.5">{elements}</div>
 }
 
 function formatInline(text: string): React.ReactNode {
@@ -2007,11 +2076,11 @@ function VoiceScreen({
                   {transcriptEntries.map((entry, idx) => (
                     <div key={idx} className={cn('flex', entry.role === 'user' ? 'justify-end' : 'justify-start')}>
                       <div className={cn('max-w-[85%] rounded-xl px-3 py-2', entry.role === 'user' ? 'bg-primary/10 text-foreground' : 'bg-secondary text-secondary-foreground')}>
-                        <p className="text-xs font-medium mb-0.5 text-muted-foreground">
+                        <p className="text-xs font-medium mb-1 text-muted-foreground">
                           {entry.role === 'user' ? 'Customer' : 'Agent'}
                         </p>
-                        <p className="text-sm leading-relaxed">{entry.text}</p>
-                        <p className="text-[10px] text-muted-foreground mt-1">{formatTimestamp(entry.timestamp)}</p>
+                        <div className="text-sm leading-relaxed">{entry.role === 'agent' ? renderMarkdown(entry.text) : entry.text}</div>
+                        <p className="text-[10px] text-muted-foreground mt-1.5">{formatTimestamp(entry.timestamp)}</p>
                       </div>
                     </div>
                   ))}
