@@ -1726,6 +1726,10 @@ function VoiceScreen({
   const [showTicketModal, setShowTicketModal] = useState(false)
   const voiceSessionIdRef = useRef('voice_' + generateUUID().slice(0, 8))
 
+  const [isAgentSpeaking, setIsAgentSpeaking] = useState(false)
+  const [isUserSpeaking, setIsUserSpeaking] = useState(false)
+  const [interruptCount, setInterruptCount] = useState(0)
+
   const wsRef = useRef<WebSocket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -1735,6 +1739,10 @@ function VoiceScreen({
   const isMutedRef = useRef(false)
   const sampleRateRef = useRef(24000)
   const transcriptEndRef = useRef<HTMLDivElement>(null)
+  const activeSourceNodesRef = useRef<AudioBufferSourceNode[]>([])
+  const isAgentSpeakingRef = useRef(false)
+  const speechEnergyBufferRef = useRef<number[]>([])
+  const lastInterruptTimeRef = useRef(0)
 
   useEffect(() => {
     isMutedRef.current = isMuted
@@ -1751,6 +1759,24 @@ function VoiceScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const stopAgentAudio = useCallback(() => {
+    // Stop all queued and playing audio source nodes immediately
+    activeSourceNodesRef.current.forEach(node => {
+      try { node.stop() } catch { /* already stopped */ }
+      try { node.disconnect() } catch { /* already disconnected */ }
+    })
+    activeSourceNodesRef.current = []
+    // Reset the playback queue so next audio starts immediately
+    nextPlayTimeRef.current = 0
+    isAgentSpeakingRef.current = false
+    setIsAgentSpeaking(false)
+
+    // Send interrupt signal to the server
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'interrupt' }))
+    }
+  }, [])
+
   const startCall = async () => {
     setCallStatus('connecting')
     setStatusMessage('Connecting to voice agent...')
@@ -1758,7 +1784,14 @@ function VoiceScreen({
     setTranscriptEntries([])
     setDuration(0)
     setThinkingText('')
+    setInterruptCount(0)
+    setIsAgentSpeaking(false)
+    setIsUserSpeaking(false)
     nextPlayTimeRef.current = 0
+    speechEnergyBufferRef.current = []
+    lastInterruptTimeRef.current = 0
+    activeSourceNodesRef.current = []
+    isAgentSpeakingRef.current = false
 
     try {
       const currentVoiceSessionId = 'voice_' + generateUUID().slice(0, 8)
@@ -1821,6 +1854,45 @@ function VoiceScreen({
       processor.onaudioprocess = (e) => {
         if (ws.readyState !== WebSocket.OPEN || isMutedRef.current) return
         const inputData = e.inputBuffer.getChannelData(0)
+
+        // Voice Activity Detection (VAD) for barge-in
+        let sumSquares = 0
+        for (let i = 0; i < inputData.length; i++) {
+          sumSquares += inputData[i] * inputData[i]
+        }
+        const rms = Math.sqrt(sumSquares / inputData.length)
+        const energyDb = 20 * Math.log10(Math.max(rms, 1e-10))
+
+        // Keep a rolling buffer of recent energy levels
+        speechEnergyBufferRef.current.push(energyDb)
+        if (speechEnergyBufferRef.current.length > 5) {
+          speechEnergyBufferRef.current.shift()
+        }
+
+        // Detect speech if energy is above threshold consistently
+        const speechThreshold = -35 // dB threshold for speech detection
+        const consecutiveSpeechFrames = speechEnergyBufferRef.current.filter(e => e > speechThreshold).length
+        const userIsSpeaking = consecutiveSpeechFrames >= 3
+
+        if (userIsSpeaking) {
+          setIsUserSpeaking(true)
+
+          // Barge-in: if agent is currently speaking, interrupt it
+          if (isAgentSpeakingRef.current) {
+            const now = Date.now()
+            // Debounce: only interrupt if at least 500ms since last interrupt
+            if (now - lastInterruptTimeRef.current > 500) {
+              lastInterruptTimeRef.current = now
+              stopAgentAudio()
+              setInterruptCount(prev => prev + 1)
+              setThinkingText('')
+            }
+          }
+        } else {
+          setIsUserSpeaking(false)
+        }
+
+        // Encode and send audio to server
         const pcm16 = new Int16Array(inputData.length)
         for (let i = 0; i < inputData.length; i++) {
           const s = Math.max(-1, Math.min(1, inputData[i]))
@@ -1858,11 +1930,30 @@ function VoiceScreen({
               sourceNode.buffer = audioBuffer
               sourceNode.connect(audioContextRef.current.destination)
 
+              // Track this source node for interruption
+              activeSourceNodesRef.current.push(sourceNode)
+              isAgentSpeakingRef.current = true
+              setIsAgentSpeaking(true)
+
+              // Clean up finished nodes from tracking array
+              sourceNode.onended = () => {
+                activeSourceNodesRef.current = activeSourceNodesRef.current.filter(n => n !== sourceNode)
+                if (activeSourceNodesRef.current.length === 0) {
+                  isAgentSpeakingRef.current = false
+                  setIsAgentSpeaking(false)
+                }
+              }
+
               const now = audioContextRef.current.currentTime
               const startTime = Math.max(now, nextPlayTimeRef.current)
               sourceNode.start(startTime)
               nextPlayTimeRef.current = startTime + audioBuffer.duration
             }
+          }
+
+          // Handle server-side interrupt acknowledgment
+          if (msg.type === 'interrupt' || msg.type === 'interrupted') {
+            stopAgentAudio()
           }
 
           if (msg.type === 'transcript') {
@@ -1909,6 +2000,16 @@ function VoiceScreen({
   }
 
   const endCall = () => {
+    // Stop all playing audio nodes
+    activeSourceNodesRef.current.forEach(node => {
+      try { node.stop() } catch { /* already stopped */ }
+      try { node.disconnect() } catch { /* already disconnected */ }
+    })
+    activeSourceNodesRef.current = []
+    isAgentSpeakingRef.current = false
+    setIsAgentSpeaking(false)
+    setIsUserSpeaking(false)
+
     if (wsRef.current) {
       wsRef.current.close()
       wsRef.current = null
@@ -1930,6 +2031,8 @@ function VoiceScreen({
       timerRef.current = null
     }
     nextPlayTimeRef.current = 0
+    speechEnergyBufferRef.current = []
+    lastInterruptTimeRef.current = 0
     setCallStatus('ended')
     setActiveAgentId(null)
   }
@@ -1958,6 +2061,7 @@ function VoiceScreen({
     setDuration(0)
     setStatusMessage('Voice call saved. Ready for triage in History.')
     setThinkingText('')
+    setInterruptCount(0)
   }
 
   const formatDuration = (seconds: number) => {
@@ -1985,16 +2089,41 @@ function VoiceScreen({
         <Card className="border-border/30 shadow-sm">
           <CardContent className="p-8 flex flex-col items-center text-center">
             <div className={cn(
-              'w-32 h-32 rounded-full flex items-center justify-center mb-6 transition-all duration-500',
+              'w-32 h-32 rounded-full flex items-center justify-center mb-6 transition-all duration-500 relative',
               callStatus === 'idle' ? 'bg-secondary' :
               callStatus === 'connecting' ? 'bg-amber-100' :
+              callStatus === 'active' && isUserSpeaking ? 'bg-blue-100 shadow-lg shadow-blue-200/50' :
+              callStatus === 'active' && isAgentSpeaking ? 'bg-green-100 shadow-lg shadow-green-200/50 ring-4 ring-green-300/30 ring-offset-2' :
               callStatus === 'active' ? 'bg-green-100 shadow-lg shadow-green-200/50' :
               'bg-red-100'
             )}>
               {callStatus === 'active' ? (
                 <div className="relative">
-                  <FiPhone className="w-12 h-12 text-green-600" />
-                  <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-green-500 animate-ping" />
+                  <FiPhone className={cn('w-12 h-12', isUserSpeaking ? 'text-blue-600' : 'text-green-600')} />
+                  {isAgentSpeaking && !isUserSpeaking && (
+                    <>
+                      <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-green-500 animate-ping" />
+                      <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 flex gap-[3px]">
+                        <div className="w-1 h-3 bg-green-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1 h-4 bg-green-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1 h-2 bg-green-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
+                        <div className="w-1 h-5 bg-green-500 rounded-full animate-pulse" style={{ animationDelay: '100ms' }} />
+                        <div className="w-1 h-3 bg-green-500 rounded-full animate-pulse" style={{ animationDelay: '250ms' }} />
+                      </div>
+                    </>
+                  )}
+                  {isUserSpeaking && (
+                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 flex gap-[3px]">
+                      <div className="w-1 h-3 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1 h-5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '100ms' }} />
+                      <div className="w-1 h-2 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
+                      <div className="w-1 h-4 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1 h-3 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '250ms' }} />
+                    </div>
+                  )}
+                  {!isAgentSpeaking && !isUserSpeaking && (
+                    <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-green-500 animate-ping" />
+                  )}
                 </div>
               ) : callStatus === 'connecting' ? (
                 <div className="animate-pulse">
@@ -2007,10 +2136,29 @@ function VoiceScreen({
               )}
             </div>
 
-            <div className="mb-2">
+            <div className="mb-2 flex flex-col items-center gap-1.5">
               <Badge variant={callStatus === 'active' ? 'default' : 'outline'} className="text-sm px-3 py-1">
                 {callStatus === 'idle' ? 'Ready' : callStatus === 'connecting' ? 'Connecting...' : callStatus === 'active' ? 'Call Active' : 'Call Ended'}
               </Badge>
+              {callStatus === 'active' && (
+                <div className="flex items-center gap-2">
+                  {isAgentSpeaking && !isUserSpeaking && (
+                    <span className="text-xs text-green-700 font-medium flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      Agent Speaking
+                    </span>
+                  )}
+                  {isUserSpeaking && (
+                    <span className="text-xs text-blue-700 font-medium flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      Listening
+                    </span>
+                  )}
+                  {!isAgentSpeaking && !isUserSpeaking && (
+                    <span className="text-xs text-muted-foreground">Idle</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {callStatus === 'active' && (
@@ -2070,12 +2218,26 @@ function VoiceScreen({
                     <FiCheck className="w-4 h-4" />
                     Save & Close
                   </Button>
-                  <Button variant="outline" onClick={() => { setCallStatus('idle'); setTranscriptEntries([]); setDuration(0); setStatusMessage(''); }}>
+                  <Button variant="outline" onClick={() => { setCallStatus('idle'); setTranscriptEntries([]); setDuration(0); setStatusMessage(''); setInterruptCount(0); }}>
                     Discard
                   </Button>
                 </div>
               )}
             </div>
+
+            {callStatus === 'active' && (
+              <div className="mt-4 w-full max-w-xs">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50/80 border border-blue-200/50 text-xs text-blue-700">
+                  <FiZap className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Barge-in enabled. Speak anytime to interrupt the agent.</span>
+                </div>
+                {interruptCount > 0 && (
+                  <p className="text-[10px] text-muted-foreground text-center mt-1.5">
+                    {interruptCount} interruption{interruptCount > 1 ? 's' : ''} during this call
+                  </p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
