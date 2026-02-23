@@ -433,6 +433,16 @@ function formatInline(text: string): React.ReactNode {
   return parts.length === 1 ? parts[0] : <>{parts}</>
 }
 
+function cleanAgentText(text: string): string {
+  if (!text) return text
+  // Remove score/confidence patterns that RAG or the model may append
+  return text
+    .replace(/\n*\s*(?:\*\*)?(?:Score|Confidence|Relevance|confidence_score|score|similarity_score)\s*[:=]\s*[\d.]+%?\s*(?:\*\*)?/gi, '')
+    .replace(/\s*\[(?:Score|Confidence|Relevance)\s*[:=]?\s*[\d.]+%?\s*\]/gi, '')
+    .replace(/\s*\((?:Score|Confidence|Relevance)\s*[:=]?\s*[\d.]+%?\s*\)/gi, '')
+    .trim()
+}
+
 function parseAgentResponse(result: AIAgentResponse) {
   try {
     let data = result?.response?.result
@@ -440,11 +450,19 @@ function parseAgentResponse(result: AIAgentResponse) {
       try {
         data = JSON.parse(data)
       } catch {
-        return { response_message: data }
+        return { response_message: cleanAgentText(data) }
       }
     }
     if (data?.result && typeof data.result === 'object') {
       data = data.result
+    }
+    if (data && typeof data === 'object') {
+      if (data.response_message && typeof data.response_message === 'string') {
+        data = { ...data, response_message: cleanAgentText(data.response_message) }
+      }
+      if (data.message && typeof data.message === 'string') {
+        data = { ...data, message: cleanAgentText(data.message) }
+      }
     }
     return data || {}
   } catch {
